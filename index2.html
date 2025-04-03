@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tracking Map with Tracking Numbers</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .tracking-map-container { max-width: 100%; margin: 0 auto; }
+        .controls { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
+        #map { height: 600px; width: 100%; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px; color: white; border: none; border-radius: 3px; }
+        .add-btn { background: #008000; }
+        .remove-btn { background: #ff0000; }
+        .update-btn { background: #800080; }
+        .point-input { margin-bottom: 10px; }
+        #tracking-number { width: 200px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="tracking-map-container">
+        <div class="controls">
+            <h3>Tracking Map</h3>
+            <label>Tracking Number: 
+                <input type="text" id="tracking-number" placeholder="Enter Tracking Number">
+            </label>
+            <div id="points-container"></div>
+            <button class="add-btn" onclick="freeTrackingMap.addPoint()">Add Destination</button>
+            <button class="remove-btn" onclick="freeTrackingMap.removePoint()">Remove Last Destination</button>
+            <button class="update-btn" onclick="freeTrackingMap.updateMap()">Update Map</button>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script>
+        const freeTrackingMap = {
+            map: null,
+            markers: [],
+            polyline: null,
+            lastLocationCircle: null,
+            trackingData: {}, // Store tracking numbers and their points
+            currentTrackingNumber: null,
+
+            initMap: function() {
+                this.map = L.map('map', { center: [39.8283, -98.5795], zoom: 4 });
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                    maxZoom: 18
+                }).addTo(this.map);
+                setTimeout(() => this.map.invalidateSize(), 100);
+            },
+
+            renderPoints: function() {
+                this.markers.forEach(marker => marker.remove());
+                this.markers = [];
+                if (this.polyline) this.polyline.remove();
+                if (this.lastLocationCircle) this.lastLocationCircle.remove();
+
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber) {
+                    alert('Please enter a tracking number.');
+                    return;
+                }
+                this.currentTrackingNumber = trackingNumber;
+
+                if (!this.trackingData[trackingNumber]) {
+                    this.trackingData[trackingNumber] = [];
+                }
+
+                const points = this.trackingData[trackingNumber];
+                const pointsContainer = document.getElementById('points-container');
+                pointsContainer.innerHTML = '';
+                points.forEach((point, index) => {
+                    const pointDiv = document.createElement('div');
+                    pointDiv.className = 'point-input';
+                    pointDiv.innerHTML = `
+                        <label>Destination ${point.label}: 
+                            <input type="text" id="lat${index}" value="${point.lat}" placeholder="Latitude" style="width: 100px;">
+                            <input type="text" id="lng${index}" value="${point.lng}" placeholder="Longitude" style="width: 100px;">
+                            <input type="text" id="address${index}" value="${point.address}" placeholder="Address" style="width: 200px;">
+                        </label>
+                    `;
+                    pointsContainer.appendChild(pointDiv);
+
+                    const marker = L.marker([point.lat, point.lng], { title: point.address })
+                        .addTo(this.map)
+                        .bindPopup(point.address);
+                    this.markers.push(marker);
+                });
+
+                const path = points.map(point => [point.lat, point.lng]);
+                if (path.length > 1) {
+                    this.polyline = L.polyline(path, { color: 'blue', weight: 5, opacity: 5, dashArray: '5, 10' }).addTo(this.map);
+                }
+
+                if (points.length > 0) {
+                    const lastPoint = points[points.length - 1];
+                    this.lastLocationCircle = L.circle([lastPoint.lat, lastPoint.lng], {
+                        radius: 500, color: 'red', weight: 9, fillColor: '#FF0000', fillOpacity: 0.1
+                    }).addTo(this.map);
+
+                    const zoomLevel = this.map.getZoom();
+                    const metersPerPx = 40075016.686 / Math.pow(2, zoomLevel) / 256;
+                    const radiusInMeters = 5 * metersPerPx;
+                    this.lastLocationCircle.setRadius(radiusInMeters);
+
+                    const bounds = L.latLngBounds(path);
+                    this.map.fitBounds(bounds);
+                }
+            },
+
+            addPoint: function() {
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber) {
+                    alert('Please enter a tracking number first.');
+                    return;
+                }
+
+                if (!this.trackingData[trackingNumber]) {
+                    this.trackingData[trackingNumber] = [];
+                }
+
+                const points = this.trackingData[trackingNumber];
+                const lastLabel = points.length > 0 ? points[points.length - 1].label : 'A';
+                const newLabel = String.fromCharCode(lastLabel.charCodeAt(0) + 1);
+                points.push({ 
+                    lat: 39.8283, 
+                    lng: -98.5795, 
+                    label: newLabel, 
+                    address: 'Enter Address' 
+                });
+                this.renderPoints();
+            },
+
+            removePoint: function() {
+                const trackingNumber = this.currentTrackingNumber;
+                if (!trackingNumber || !this.trackingData[trackingNumber] || this.trackingData[trackingNumber].length === 0) return;
+
+                this.trackingData[trackingNumber].pop();
+                this.renderPoints();
+            },
+
+            updateMap: function() {
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber) {
+                    alert('Please enter a tracking number.');
+                    return;
+                }
+
+                if (!this.trackingData[trackingNumber]) {
+                    this.trackingData[trackingNumber] = [];
+                }
+
+                const points = this.trackingData[trackingNumber];
+                this.trackingData[trackingNumber] = points.map((point, index) => {
+                    const newLat = parseFloat(document.getElementById(`lat${index}`).value) || point.lat;
+                    const newLng = parseFloat(document.getElementById(`lng${index}`).value) || point.lng;
+                    const newAddress = document.getElementById(`address${index}`).value || point.address;
+                    return { lat: newLat, lng: newLng, label: point.label, address: newAddress };
+                });
+                this.renderPoints();
+            }
+        };
+
+        window.freeTrackingMap = freeTrackingMap;
+        document.addEventListener('DOMContentLoaded', () => freeTrackingMap.initMap());
+    </script>
+</body>
+</html>

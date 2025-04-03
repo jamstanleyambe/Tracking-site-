@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin - Tracking Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .tracking-map-container { max-width: 100%; margin: 0 auto; }
+        .controls { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
+        #map { height: 600px; width: 100%; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px; color: white; border: none; border-radius: 3px; }
+        .add-btn { background: #008000; }
+        .remove-btn { background: #ff0000; }
+        .update-btn { background: #800080; }
+        .point-input, .tracking-input { margin-bottom: 10px; }
+        #tracking-list { max-height: 200px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="tracking-map-container">
+        <div class="controls">
+            <h3>Admin - Manage Tracking</h3>
+            <div class="tracking-input">
+                <label>Tracking Number: <input type="text" id="tracking-number" placeholder="Enter Tracking Number"></label>
+                <button class="add-btn" onclick="freeTrackingMap.createTracking()">Create Tracking</button>
+            </div>
+            <div class="tracking-input">
+                <label>User Name: <input type="text" id="user-name" placeholder="Enter User Name"></label>
+                <label>Order Status: <input type="text" id="order-status" placeholder="e.g., Shipped"></label>
+                <label>Departure Date: <input type="date" id="departure-date"></label>
+                <label>Expected Delivery: <input type="date" id="expected-delivery"></label>
+            </div>
+            <div id="points-container"></div>
+            <button class="add-btn" onclick="freeTrackingMap.addPoint()">Add Location</button>
+            <button class="remove-btn" onclick="freeTrackingMap.removePoint()">Remove Last Location</button>
+            <button class="update-btn" onclick="freeTrackingMap.updateMap()">Update Map</button>
+            <h4>Tracking Numbers</h4>
+            <div id="tracking-list"></div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script>
+        const freeTrackingMap = {
+            map: null,
+            markers: [],
+            polyline: null,
+            lastLocationCircle: null,
+            trackingData: JSON.parse(localStorage.getItem('trackingData')) || {},
+            currentTrackingNumber: null,
+
+            initMap: function() {
+                this.map = L.map('map', { center: [39.8283, -98.5795], zoom: 4 });
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                    maxZoom: 18
+                }).addTo(this.map);
+                this.renderTrackingList();
+                setTimeout(() => this.map.invalidateSize(), 100);
+            },
+
+            renderTrackingList: function() {
+                const list = document.getElementById('tracking-list');
+                list.innerHTML = '';
+                Object.keys(this.trackingData).forEach(trackingNumber => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `
+                        <span>${trackingNumber}</span>
+                        <button onclick="freeTrackingMap.loadTracking('${trackingNumber}')" style="margin-left: 10px; background: #0000FF; color: white;">Load</button>
+                        <button onclick="freeTrackingMap.deleteTracking('${trackingNumber}')" style="margin-left: 5px; background: #FF0000; color: white;">Delete</button>
+                    `;
+                    list.appendChild(div);
+                });
+            },
+
+            renderPoints: function() {
+                this.markers.forEach(marker => marker.remove());
+                this.markers = [];
+                if (this.polyline) this.polyline.remove();
+                if (this.lastLocationCircle) this.lastLocationCircle.remove();
+
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber || !this.trackingData[trackingNumber]) return;
+
+                this.currentTrackingNumber = trackingNumber;
+                const data = this.trackingData[trackingNumber];
+                document.getElementById('user-name').value = data.userName || '';
+                document.getElementById('order-status').value = data.orderStatus || '';
+                document.getElementById('departure-date').value = data.departureDate || '';
+                document.getElementById('expected-delivery').value = data.expectedDelivery || '';
+
+                const pointsContainer = document.getElementById('points-container');
+                pointsContainer.innerHTML = '';
+                data.points.forEach((point, index) => {
+                    const pointDiv = document.createElement('div');
+                    pointDiv.className = 'point-input';
+                    pointDiv.innerHTML = `
+                        <label>Location ${point.label}: 
+                            <input type="text" id="lat${index}" value="${point.lat}" placeholder="Latitude" style="width: 100px;">
+                            <input type="text" id="lng${index}" value="${point.lng}" placeholder="Longitude" style="width: 100px;">
+                            <input type="text" id="address${index}" value="${point.address}" placeholder="Address" style="width: 200px;">
+                        </label>
+                    `;
+                    pointsContainer.appendChild(pointDiv);
+
+                    const marker = L.marker([point.lat, point.lng], { title: point.address })
+                        .addTo(this.map)
+                        .bindPopup(point.address);
+                    this.markers.push(marker);
+                });
+
+                const path = data.points.map(point => [point.lat, point.lng]);
+                if (path.length > 1) {
+                    this.polyline = L.polyline(path, { color: 'blue', weight: 5, opacity: 5, dashArray: '5, 10' }).addTo(this.map);
+                }
+
+                if (data.points.length > 0) {
+                    const lastPoint = data.points[data.points.length - 1];
+                    this.lastLocationCircle = L.circle([lastPoint.lat, lastPoint.lng], {
+                        radius: 500, color: 'red', weight: 9, fillColor: '#FF0000', fillOpacity: 0.1
+                    }).addTo(this.map);
+
+                    const zoomLevel = this.map.getZoom();
+                    const metersPerPx = 40075016.686 / Math.pow(2, zoomLevel) / 256;
+                    const radiusInMeters = 5 * metersPerPx;
+                    this.lastLocationCircle.setRadius(radiusInMeters);
+
+                    const bounds = L.latLngBounds(path);
+                    this.map.fitBounds(bounds);
+                }
+            },
+
+            createTracking: function() {
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber) {
+                    alert('Please enter a tracking number.');
+                    return;
+                }
+                if (!this.trackingData[trackingNumber]) {
+                    this.trackingData[trackingNumber] = { points: [], userName: '', orderStatus: '', departureDate: '', expectedDelivery: '' };
+                    this.saveData();
+                    this.renderTrackingList();
+                    this.loadTracking(trackingNumber);
+                } else {
+                    alert('Tracking number already exists.');
+                }
+            },
+
+            loadTracking: function(trackingNumber) {
+                document.getElementById('tracking-number').value = trackingNumber;
+                this.renderPoints();
+            },
+
+            deleteTracking: function(trackingNumber) {
+                delete this.trackingData[trackingNumber];
+                this.saveData();
+                this.renderTrackingList();
+                if (this.currentTrackingNumber === trackingNumber) {
+                    document.getElementById('tracking-number').value = '';
+                    this.renderPoints();
+                }
+            },
+
+            addPoint: function() {
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber || !this.trackingData[trackingNumber]) {
+                    alert('Please create or load a tracking number first.');
+                    return;
+                }
+
+                const points = this.trackingData[trackingNumber].points;
+                const lastLabel = points.length > 0 ? points[points.length - 1].label : 'A';
+                const newLabel = String.fromCharCode(lastLabel.charCodeAt(0) + 1);
+                points.push({ lat: 39.8283, lng: -98.5795, label: newLabel, address: 'Enter Address' });
+                this.saveData();
+                this.renderPoints();
+            },
+
+            removePoint: function() {
+                const trackingNumber = this.currentTrackingNumber;
+                if (!trackingNumber || !this.trackingData[trackingNumber] || this.trackingData[trackingNumber].points.length === 0) return;
+
+                this.trackingData[trackingNumber].points.pop();
+                this.saveData();
+                this.renderPoints();
+            },
+
+            updateMap: function() {
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber || !this.trackingData[trackingNumber]) {
+                    alert('Please create or load a tracking number.');
+                    return;
+                }
+
+                const data = this.trackingData[trackingNumber];
+                data.userName = document.getElementById('user-name').value;
+                data.orderStatus = document.getElementById('order-status').value;
+                data.departureDate = document.getElementById('departure-date').value;
+                data.expectedDelivery = document.getElementById('expected-delivery').value;
+                data.points = data.points.map((point, index) => {
+                    const newLat = parseFloat(document.getElementById(`lat${index}`).value) || point.lat;
+                    const newLng = parseFloat(document.getElementById(`lng${index}`).value) || point.lng;
+                    const newAddress = document.getElementById(`address${index}`).value || point.address;
+                    return { lat: newLat, lng: newLng, label: point.label, address: newAddress };
+                });
+                this.saveData();
+                this.renderPoints();
+            },
+
+            saveData: function() {
+                localStorage.setItem('trackingData', JSON.stringify(this.trackingData));
+            }
+        };
+
+        window.freeTrackingMap = freeTrackingMap;
+        document.addEventListener('DOMContentLoaded', () => freeTrackingMap.initMap());
+    </script>
+</body>
+</html>

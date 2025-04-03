@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tracking Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .tracking-map-container { max-width: 100%; margin: 0 auto; }
+        .controls { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
+        #map { height: 600px; width: 100%; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px; color: white; border: none; border-radius: 3px; }
+        .add-btn { background: #008000; }
+        .remove-btn { background: #ff0000; }
+        .update-btn { background: #800080; }
+        .point-input { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="tracking-map-container">
+        <div class="controls">
+            <h3>Update Locations</h3>
+            <div id="points-container"></div>
+            <button class="add-btn" onclick="freeTrackingMap.addPoint()">Add Point</button>
+            <button class="remove-btn" onclick="freeTrackingMap.removePoint()">Remove Last Point</button>
+            <button class="update-btn" onclick="freeTrackingMap.updateMap()">Update Map</button>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script>
+        const freeTrackingMap = {
+            map: null,
+            markers: [],
+            polyline: null,
+            lastLocationCircle: null,
+            points: [], // Start with no hardcoded points
+
+            initMap: function() {
+                this.map = L.map('map', { center: [39.8283, -98.5795], zoom: 4 }); // Default center (US)
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                    maxZoom: 18
+                }).addTo(this.map);
+                this.renderPoints();
+                setTimeout(() => this.map.invalidateSize(), 100);
+            },
+
+            renderPoints: function() {
+                this.markers.forEach(marker => marker.remove());
+                this.markers = [];
+                if (this.polyline) this.polyline.remove();
+                if (this.lastLocationCircle) this.lastLocationCircle.remove();
+
+                const pointsContainer = document.getElementById('points-container');
+                pointsContainer.innerHTML = '';
+                this.points.forEach((point, index) => {
+                    const pointDiv = document.createElement('div');
+                    pointDiv.className = 'point-input';
+                    pointDiv.innerHTML = `
+                        <label>Location ${point.label}: 
+                            <input type="text" id="lat${index}" value="${point.lat}" placeholder="Latitude" style="width: 100px;">
+                            <input type="text" id="lng${index}" value="${point.lng}" placeholder="Longitude" style="width: 100px;">
+                            <input type="text" id="address${index}" value="${point.address}" placeholder="Address" style="width: 200px;">
+                        </label>
+                    `;
+                    pointsContainer.appendChild(pointDiv);
+
+                    const marker = L.marker([point.lat, point.lng], { title: point.address })
+                        .addTo(this.map)
+                        .bindPopup(point.address);
+                    this.markers.push(marker);
+                });
+
+                const path = this.points.map(point => [point.lat, point.lng]);
+                if (path.length > 1) {
+                    this.polyline = L.polyline(path, { color: 'blue', weight: 5, opacity: 5, dashArray: '5, 10' }).addTo(this.map);
+                }
+
+                if (this.points.length > 0) {
+                    const lastPoint = this.points[this.points.length - 1];
+                    this.lastLocationCircle = L.circle([lastPoint.lat, lastPoint.lng], {
+                        radius: 500, color: 'red', weight: 9, fillColor: '#FF0000', fillOpacity: 0.1
+                    }).addTo(this.map);
+
+                    const zoomLevel = this.map.getZoom();
+                    const metersPerPx = 40075016.686 / Math.pow(2, zoomLevel) / 256;
+                    const radiusInMeters = 5 * metersPerPx;
+                    this.lastLocationCircle.setRadius(radiusInMeters);
+
+                    const bounds = L.latLngBounds(path);
+                    this.map.fitBounds(bounds);
+                }
+            },
+
+            addPoint: function() {
+                const lastLabel = this.points.length > 0 ? this.points[this.points.length - 1].label : 'A';
+                const newLabel = String.fromCharCode(lastLabel.charCodeAt(0) + 1);
+                this.points.push({ 
+                    lat: 39.8283, // Default center of US
+                    lng: -98.5795, 
+                    label: newLabel, 
+                    address: 'Enter Address' 
+                });
+                this.renderPoints();
+            },
+
+            removePoint: function() {
+                if (this.points.length > 0) { // Allow removal of all points
+                    this.points.pop();
+                    this.renderPoints();
+                }
+            },
+
+            updateMap: function() {
+                this.points = this.points.map((point, index) => {
+                    const newLat = parseFloat(document.getElementById(`lat${index}`).value) || point.lat;
+                    const newLng = parseFloat(document.getElementById(`lng${index}`).value) || point.lng;
+                    const newAddress = document.getElementById(`address${index}`).value || point.address;
+                    return { lat: newLat, lng: newLng, label: point.label, address: newAddress };
+                });
+                this.renderPoints();
+            }
+        };
+
+        window.freeTrackingMap = freeTrackingMap;
+        document.addEventListener('DOMContentLoaded', () => freeTrackingMap.initMap());
+    </script>
+</body>
+</html>

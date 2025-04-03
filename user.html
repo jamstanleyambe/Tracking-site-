@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>User - Tracking Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        .tracking-map-container { max-width: 100%; margin: 0 auto; }
+        .controls { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
+        #map { height: 600px; width: 100%; border: 1px solid #ccc; }
+        button { margin: 5px; padding: 5px; color: white; border: none; border-radius: 3px; background: #800080; }
+        .info { margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="tracking-map-container">
+        <div class="controls">
+            <h3>User - Track Your Order</h3>
+            <label>Tracking Number: 
+                <input type="text" id="tracking-number" placeholder="Enter Tracking Number">
+            </label>
+            <button onclick="freeTrackingMap.showTracking()">Show Tracking</button>
+            <div id="tracking-info" class="info"></div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script>
+        const freeTrackingMap = {
+            map: null,
+            markers: [],
+            polyline: null,
+            lastLocationCircle: null,
+            trackingData: JSON.parse(localStorage.getItem('trackingData')) || {},
+
+            initMap: function() {
+                this.map = L.map('map', { center: [39.8283, -98.5795], zoom: 4 });
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                    maxZoom: 18
+                }).addTo(this.map);
+                setTimeout(() => this.map.invalidateSize(), 100);
+            },
+
+            showTracking: function() {
+                this.markers.forEach(marker => marker.remove());
+                this.markers = [];
+                if (this.polyline) this.polyline.remove();
+                if (this.lastLocationCircle) this.lastLocationCircle.remove();
+
+                const trackingNumber = document.getElementById('tracking-number').value.trim();
+                if (!trackingNumber || !this.trackingData[trackingNumber]) {
+                    alert('Invalid or unknown tracking number.');
+                    document.getElementById('tracking-info').innerHTML = '';
+                    return;
+                }
+
+                const data = this.trackingData[trackingNumber];
+                document.getElementById('tracking-info').innerHTML = `
+                    <p><strong>User Name:</strong> ${data.userName || 'N/A'}</p>
+                    <p><strong>Order Status:</strong> ${data.orderStatus || 'N/A'}</p>
+                    <p><strong>Departure Date:</strong> ${data.departureDate || 'N/A'}</p>
+                    <p><strong>Expected Delivery:</strong> ${data.expectedDelivery || 'N/A'}</p>
+                `;
+
+                data.points.forEach(point => {
+                    const marker = L.marker([point.lat, point.lng], { title: point.address })
+                        .addTo(this.map)
+                        .bindPopup(point.address);
+                    this.markers.push(marker);
+                });
+
+                const path = data.points.map(point => [point.lat, point.lng]);
+                if (path.length > 1) {
+                    this.polyline = L.polyline(path, { color: 'blue', weight: 5, opacity: 5, dashArray: '5, 10' }).addTo(this.map);
+                }
+
+                if (data.points.length > 0) {
+                    const lastPoint = data.points[data.points.length - 1];
+                    this.lastLocationCircle = L.circle([lastPoint.lat, lastPoint.lng], {
+                        radius: 500, color: 'red', weight: 9, fillColor: '#FF0000', fillOpacity: 0.1
+                    }).addTo(this.map);
+
+                    const zoomLevel = this.map.getZoom();
+                    const metersPerPx = 40075016.686 / Math.pow(2, zoomLevel) / 256;
+                    const radiusInMeters = 5 * metersPerPx;
+                    this.lastLocationCircle.setRadius(radiusInMeters);
+
+                    const bounds = L.latLngBounds(path);
+                    this.map.fitBounds(bounds);
+                }
+            }
+        };
+
+        window.freeTrackingMap = freeTrackingMap;
+        document.addEventListener('DOMContentLoaded', () => freeTrackingMap.initMap());
+    </script>
+</body>
+</html>
